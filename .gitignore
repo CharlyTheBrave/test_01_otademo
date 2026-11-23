@@ -13,3 +13,7 @@
 !/scripts/ota_release.py
 !/src/
 !/src/main.cpp
+!/src/ota_update.cpp
+!/src/ota_update.h
+!/src/wifi_connection.cpp
+!/src/wifi_connection.h

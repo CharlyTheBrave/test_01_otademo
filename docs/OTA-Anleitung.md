@@ -1,6 +1,6 @@
 # ESP32 Classic OTA-Übung mit PlatformIO und Arduino
 
-Der ESP32 gibt bei 115200 Baud einmal pro Sekunde `hello world 1` aus. Mit WLAN, gültiger Uhrzeit und eingerichtetem Prüfschlüssel fragt ein eigener Task alle 30 Sekunden das aktuelle GitHub Release ab. Der HTTP-Download beginnt mit einem kurzen Versionsheader. Für eine höhere Version lädt der ESP32 das App-Image in den freien OTA-Slot und prüft die ECDSA-P-256-Signatur über Versionsheader und Image. Erst nach erfolgreicher Prüfung wählt er den neuen Slot und startet neu. Bei einem abgebrochenen Download oder einer ungültigen Signatur läuft die bisherige Firmware weiter.
+Der ESP32 gibt bei 115200 Baud einmal pro Sekunde `hello world 1` aus. Mit WLAN, gültiger Uhrzeit und eingerichtetem Prüfschlüssel fragt `loop()` alle 30 Sekunden das aktuelle GitHub Release ab. Während der synchronen Prüfung und eines Downloads pausiert die reguläre Ausgabe. Der HTTP-Download beginnt mit einem kurzen Versionsheader. Für eine höhere Version lädt der ESP32 das App-Image in den freien OTA-Slot und prüft die ECDSA-P-256-Signatur über Versionsheader und Image. Erst nach erfolgreicher Prüfung wählt er den neuen Slot und startet neu. Bei einem abgebrochenen Download oder einer ungültigen Signatur läuft die bisherige Firmware weiter.
 
 ## 1. PlatformIO und Schlüssel einrichten
 
@@ -82,3 +82,9 @@ Wenn das Release einen Beschreibungstext enthält, zeigt der Monitor zusätzlich
 Der Monitor zeigt die HTTP-Statuscodes, die gefundene Version, die Signaturprüfung und den Neustart. Vor jeder GET-Anfrage zeigt `GET line` ihre Zeilenlänge inklusive Query-Parametern. `line buffer minimum` zählt das abschließende Nullbyte dazu. Der konfigurierte Puffer braucht darüber hinaus Platz für HTTP-Header und Spielraum für wechselnde GitHub-Weiterleitungen.
 
 Wenn Version 1 weiterläuft, öffne die Release-URL ohne GitHub-Anmeldung und prüfe, ob `firmware.bin` heruntergeladen wird. Prüfe außerdem das WLAN, den Zugang zu `pool.ntp.org` über UDP-Port 123 und ob beide Builds denselben Prüfschlüssel verwenden. Beim Reset können ROM und Bootloader eigene Meldungen ausgeben.
+
+## Module in einem anderen Arduino-Projekt verwenden
+
+- `src/wifi_connection.h` und `src/wifi_connection.cpp` lesen die WLAN-Daten aus `credentials` und verbinden den ESP32. Rufe `WifiConnection::begin()` im Setup und `WifiConnection::reportStatus()` im Loop auf. Für diese WLAN-Einrichtung benötigt das Zielprojekt die NVS-Partition `credentials` und den Namensraum `wifi`.
+- `src/ota_update.h` und `src/ota_update.cpp` übernehmen HTTPS, Release-Infos, Signaturprüfung und Installation. Das Zielprojekt braucht zwei OTA-App-Slots und eine `otadata`-Partition. Rufe einmal `OtaUpdate::begin()` auf. Rufe `OtaUpdate::checkAndInstall()` synchron aus `loop()` mit Release-URL, laufender Versionsnummer und öffentlichem P-256-Schlüssel auf, sobald WLAN und Systemzeit verfügbar sind. Die Demo reserviert dafür mit `SET_LOOP_TASK_STACK_SIZE(10240)` einen größeren Stack für die Arduino-Schleife. Bei `true` kann die Anwendung neu starten.
+- `main.cpp` zeigt die Anbindung mit Arduino-Setup, 30-Sekunden-Prüfung, Uhrzeitsynchronisation und serieller Ausgabe. Für denselben Release-Build übernimm auch `scripts/ota_release.py`, `version.txt` und die zugehörigen Einstellungen aus `platformio.ini`.
