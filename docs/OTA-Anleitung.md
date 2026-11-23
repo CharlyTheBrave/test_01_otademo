@@ -1,6 +1,6 @@
 # ESP32 Classic OTA-Übung mit PlatformIO und Arduino
 
-Der ESP32 gibt bei 115200 Baud einmal pro Sekunde `hello world 1` aus. Mit WLAN, gültiger Uhrzeit und eingerichtetem Prüfschlüssel fragt ein eigener Task alle 60 Sekunden das aktuelle GitHub Release ab. Der HTTP-Download beginnt mit einem kurzen Versionsheader. Für eine höhere Version lädt der ESP32 das App-Image in den freien OTA-Slot und prüft die ECDSA-P-256-Signatur über Versionsheader und Image. Erst nach erfolgreicher Prüfung wählt er den neuen Slot und startet neu. Bei einem abgebrochenen Download oder einer ungültigen Signatur läuft die bisherige Firmware weiter.
+Der ESP32 gibt bei 115200 Baud einmal pro Sekunde `hello world 1` aus. Mit WLAN, gültiger Uhrzeit und eingerichtetem Prüfschlüssel fragt ein eigener Task alle 30 Sekunden das aktuelle GitHub Release ab. Der HTTP-Download beginnt mit einem kurzen Versionsheader. Für eine höhere Version lädt der ESP32 das App-Image in den freien OTA-Slot und prüft die ECDSA-P-256-Signatur über Versionsheader und Image. Erst nach erfolgreicher Prüfung wählt er den neuen Slot und startet neu. Bei einem abgebrochenen Download oder einer ungültigen Signatur läuft die bisherige Firmware weiter.
 
 ## 1. PlatformIO und Schlüssel einrichten
 
@@ -64,13 +64,21 @@ pio device monitor --port COM5 --baud 115200
    pio run -t ota-release
    ```
 
-3. Der Befehl prüft die Signatur mit dem öffentlichen Schlüssel. Verwende nach erfolgreichem Lauf die Datei **`.pio/build/esp32dev/ota/firmware.bin`** als Release-Asset. PlatformIO verwendet für USB-Uploads die Datei **`.pio/build/esp32dev/firmware.bin`**. Das Release-Asset enthält zusätzlich den Versionsheader und die Signatur.
+3. Der Befehl prüft die Signatur mit dem öffentlichen Schlüssel. Im Ordner **`.pio/build/esp32dev/ota/`** liegen **`firmware.bin`** und **`build-info.json`** für das Release. Die JSON-Datei enthält die Firmware-Version und den UTC-Zeitstempel des erzeugten App-Images. PlatformIO verwendet für USB-Uploads die Datei **`.pio/build/esp32dev/firmware.bin`**. Das Release-Image enthält zusätzlich den Versionsheader und die Signatur.
 
 ## 5. Auf GitHub veröffentlichen und OTA prüfen
 
 1. Committe und pushe den zu Version 2 gehörenden Quellstand.
-2. Öffne im öffentlichen Repository **Releases → Draft a new release**. Lege den Tag `v2` für diesen Commit an und lade **`.pio/build/esp32dev/ota/firmware.bin`** als Asset hoch.
+2. Öffne im öffentlichen Repository **Releases → Draft a new release**. Lege den Tag `v2` für diesen Commit an, gib einen Release-Titel ein und lade **`firmware.bin`** und **`build-info.json`** aus **`.pio/build/esp32dev/ota/`** als Assets hoch.
 3. Veröffentliche das Release als **Latest**. Die feste Adresse aus `platformio.ini` führt jetzt zu diesem Asset. [GitHub zu Release-Asset-Links](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases)
 4. Lass Version 1 auf dem Board laufen. Nach WLAN-Verbindung und Uhrzeitsynchronisation sollte das Board beim nächsten erfolgreichen Check das Update installieren, neu starten und `hello world 2` ausgeben.
+
+Jede `hello world`-Zeile beginnt mit der Uhrzeit in UTC, etwa `14:32:08 UTC hello world 2`. Bis zur Netzzeitsynchronisation steht dort die Laufzeit seit dem Start, etwa `uptime 5s hello world 2`.
+
+Bei jeder erfolgreichen Versionsabfrage zeigt der Monitor auch Git-Tag, Release-Titel und Build-Datum, selbst wenn die Version bereits installiert ist. Der ESP32 liest die Metadaten für den Tag, auf den GitHub den Firmware-Download umleitet, und aktualisiert den Cache nach fünf Minuten oder bei einem Versions- oder Tagwechsel. Bei älteren Releases ohne `build-info.json` erscheint für das Build-Datum `unavailable`.
+
+Wenn das Release einen Beschreibungstext enthält, zeigt der Monitor zusätzlich die ersten 255 Zeichen der Release Notes. Der Auszug verwendet das Markdown aus GitHub und erhält Zeilenumbrüche.
+
+Der Monitor zeigt die HTTP-Statuscodes, die gefundene Version, die Signaturprüfung und den Neustart. Vor jeder GET-Anfrage zeigt `GET line` ihre Zeilenlänge inklusive Query-Parametern. `line buffer minimum` zählt das abschließende Nullbyte dazu. Der konfigurierte Puffer braucht darüber hinaus Platz für HTTP-Header und Spielraum für wechselnde GitHub-Weiterleitungen.
 
 Wenn Version 1 weiterläuft, öffne die Release-URL ohne GitHub-Anmeldung und prüfe, ob `firmware.bin` heruntergeladen wird. Prüfe außerdem das WLAN, den Zugang zu `pool.ntp.org` über UDP-Port 123 und ob beide Builds denselben Prüfschlüssel verwenden. Beim Reset können ROM und Bootloader eigene Meldungen ausgeben.

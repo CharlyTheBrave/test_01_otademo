@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 import json
 import os
 import re
@@ -61,13 +62,21 @@ def sign_release(source, target, env):
     output.mkdir(exist_ok=True)
     unsigned = output / "unsigned.bin"
     temporary = output / "signed.tmp"
-    image = Path(str(source[0])).read_bytes()
+    image_file = Path(str(source[0]))
+    image = image_file.read_bytes()
+    built_at = datetime.fromtimestamp(image_file.stat().st_mtime, timezone.utc)
     unsigned.write_bytes(struct.pack("<4sI", b"OTA1", version) + image)
     espsecure("sign-data", "--version", "1", "--keyfile", private_key, "--output", temporary, unsigned)
     espsecure("verify-signature", "--version", "1", "--keyfile", public_key, temporary)
     release = output / "firmware.bin"
     temporary.replace(release)
+    build_info = output / "build-info.json"
+    build_info.write_text(json.dumps({
+        "firmware_version": version,
+        "built_at": built_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }) + "\n", encoding="ascii")
     print(f"Signed OTA release {version}: {release}")
+    print(f"OTA build information: {build_info}")
 
 
 env.AddCustomTarget("ota-key", None, prepare_key, title="Prepare OTA signing key")
