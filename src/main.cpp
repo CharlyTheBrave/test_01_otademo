@@ -16,7 +16,12 @@ namespace {
 constexpr size_t headerSize = 8;
 constexpr size_t signatureSize = 68; // espsecure V1: four zero bytes, then P-256 r || s
 constexpr uint32_t helloInterval = 1000;
+constexpr uint32_t wifiConnectTimeout = 15000;
 uint32_t nextHello;
+uint32_t wifiStartedAt;
+bool wifiStarted = false;
+bool wifiWasConnected = false;
+bool wifiStatusReported = false;
 
 bool loadWifi(char (&ssid)[33], char (&password)[65]) {
     if (nvs_flash_init_partition("credentials") != ESP_OK) {
@@ -173,18 +178,42 @@ void setup() {
 
     char ssid[33];
     char password[65];
+    if (!loadWifi(ssid, password)) {
+        Serial.println("WiFi not connected: credentials missing or unreadable");
+        return;
+    }
+
+    Serial.printf("WiFi connecting: SSID=\"%s\", password=%s\n",
+                  ssid, password[0] ? "set" : "empty");
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(ssid, password);
+    wifiStartedAt = millis();
+    wifiStarted = true;
+
     if (hasOtaKey && strstr(otaUrl, "DEIN-KONTO/DEIN-REPO") == nullptr &&
-        loadWifi(ssid, password) && psa_crypto_init() == PSA_SUCCESS) {
-        WiFi.persistent(false);
-        WiFi.setAutoReconnect(true);
-        WiFi.begin(ssid, password);
+        psa_crypto_init() == PSA_SUCCESS) {
         configTime(0, 0, "pool.ntp.org");
         xTaskCreate(otaTask, "ota", 10240, nullptr, 1, nullptr);
     }
 }
 
 void loop() {
-    if (static_cast<int32_t>(millis() - nextHello) >= 0) {
+    const uint32_t now = millis();
+    if (wifiStarted) {
+        const wl_status_t status = WiFi.status();
+        const bool connected = status == WL_CONNECTED;
+        if (connected && !wifiWasConnected) {
+            Serial.printf("WiFi connected: IP=%s\n", WiFi.localIP().toString().c_str());
+            wifiStatusReported = true;
+        } else if (!connected && (wifiWasConnected ||
+                   (!wifiStatusReported && now - wifiStartedAt >= wifiConnectTimeout))) {
+            Serial.printf("WiFi not connected: status=%d\n", static_cast<int>(status));
+            wifiStatusReported = true;
+        }
+        wifiWasConnected = connected;
+    }
+    if (static_cast<int32_t>(now - nextHello) >= 0) {
         Serial.printf("hello world %lu\n", static_cast<unsigned long>(firmwareVersion));
         nextHello += helloInterval;
     }

@@ -53,7 +53,7 @@ $pioEsptool = Join-Path $env:USERPROFILE '.platformio\packages\tool-esptool\espt
 pio device monitor --port COM5 --baud 115200
 ```
 
-`0x3d0000` ist der Anfang der separaten Partition `credentials`. Die Zugangsdaten bleiben bei OTA-Updates erhalten. Beide WLAN-Dateien werden von Git ignoriert. Im Monitor sollte jede Sekunde `hello world 1` erscheinen. [Espressifs eigenständiger NVS-Generator](https://github.com/espressif/esp-idf-nvs-partition-gen)
+`0x3d0000` ist der Anfang der separaten Partition `credentials`. Die Zugangsdaten bleiben bei OTA-Updates erhalten. Beide WLAN-Dateien werden von Git ignoriert. Im Monitor erscheint jede Sekunde `hello world 1`. Beim Verbindungsversuch siehst du die verwendete SSID und ob ein Passwort gesetzt ist. Bei erfolgreicher Verbindung erscheint die IP-Adresse. Falls nach 15 Sekunden keine Verbindung besteht oder eine bestehende Verbindung abbricht, erscheint `WiFi not connected`. Der WLAN-Test funktioniert auch mit der Platzhalter-URL. [Espressifs eigenständiger NVS-Generator](https://github.com/espressif/esp-idf-nvs-partition-gen)
 
 ## 4. Version 2 bauen und signieren
 
