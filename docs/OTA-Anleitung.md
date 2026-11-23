@@ -1,44 +1,39 @@
-# ESP32 Classic OTA-Übung
+# ESP32 Classic OTA-Übung mit PlatformIO und Arduino
 
-Der ESP32 gibt bei 115200 Baud einmal pro Sekunde `hello world 1` aus. Mit eingerichtetem WLAN und synchronisierter Uhr prüft ein eigener Task ungefähr alle 60 Sekunden das aktuelle GitHub Release. Der erste Check erfolgt im ersten Durchlauf mit WLAN und gültiger Uhrzeit.
+Der ESP32 gibt bei 115200 Baud einmal pro Sekunde `hello world 1` aus. Mit WLAN, gültiger Uhrzeit und eingerichtetem Prüfschlüssel fragt ein eigener Task alle 60 Sekunden das aktuelle GitHub Release ab. Der HTTP-Download beginnt mit einem kurzen Versionsheader. Für eine höhere Version lädt der ESP32 das App-Image in den freien OTA-Slot und prüft die ECDSA-P-256-Signatur über Versionsheader und Image. Erst nach erfolgreicher Prüfung wählt er den neuen Slot und startet neu. Bei einem abgebrochenen Download oder einer ungültigen Signatur läuft die bisherige Firmware weiter.
 
-Die Firmware liest zunächst den ESP-IDF-Image-Header mit Projektname und Versionsnummer. Bei gleicher oder kleinerer Version beendet sie die Verbindung nach dem Header. Eine höhere Version lädt sie in einen freien OTA-Slot. ESP-IDF prüft die ECDSA-Signatur, bevor es den Slot zum Start auswählt. Bei einem unvollständigen oder ungültig signierten Download bleibt die laufende Firmware aktiv. Die Prüfroutine verwendet den in der Firmware hinterlegten öffentlichen Schlüssel. Hardware Secure Boot und Flash-Verschlüsselung sind für diese Übung deaktiviert. [Espressif zur Signaturprüfung bei OTA](https://docs.espressif.com/projects/esp-idf/en/v5.4.4/esp32/security/secure-boot-v1.html#signed-app-verification-without-hardware-secure-boot)
+## 1. PlatformIO und Schlüssel einrichten
 
-## 1. Build-Umgebung und Schlüssel einrichten
+Öffne den Projektordner in VS Code mit der **PlatformIO IDE**-Erweiterung. Verwende ein ESP32-Classic-Board mit mindestens 4 MiB Flash, ein USB-Datenkabel und ein 2,4-GHz-WLAN. Das Projekt verwendet das PlatformIO-Board `esp32dev` und `framework = arduino`. Die Build- und Flash-Werkzeuge verwaltet PlatformIO. [PlatformIO für Espressif 32](https://docs.platformio.org/en/latest/platforms/espressif32.html)
 
-Vorausgesetzt werden ein ESP32 Classic mit mindestens 4 MiB Flash, ein USB-Datenkabel, ein 2,4-GHz-WLAN und ESP-IDF **v5.4.4** für Windows. Öffne die ESP-IDF-PowerShell und wechsle in den Projektordner. Ersetze in den folgenden Befehlen `COM5` durch den Port deines Boards. [ESP-IDF installieren](https://docs.espressif.com/projects/esp-idf/en/v5.4.4/esp32/get-started/index.html)
+Öffne in VS Code ein **PlatformIO Core CLI**-Terminal und führe im Projektordner aus:
 
 ```powershell
-idf.py --version
-idf.py set-target esp32
-New-Item -ItemType Directory -Force keys
-if (-not (Test-Path keys/ota-signing-key.pem)) {
-    python -m espsecure generate_signing_key --version 1 keys/ota-signing-key.pem
-}
+pio run -t ota-key
 ```
 
-Der private Schlüssel wird einmal erzeugt. Bewahre ihn mit einer privaten Sicherung auf und verwende ihn für alle Releases. ESP-IDF leitet daraus den öffentlichen Prüfschlüssel ab und signiert die App automatisch bei `idf.py build`. Der Ordner `keys/` ist in `.gitignore` eingetragen.
+Der Befehl erzeugt einmalig `keys/ota-signing-key.pem` und leitet daraus den öffentlichen Prüfschlüssel `keys/ota-public-key.bin` ab. Falls du schon einen ECDSA-Schlüssel aus der bisherigen Demo hast, verwende dieselbe PEM-Datei an dieser Stelle. Sichere den privaten Schlüssel separat und verwende ihn für alle Firmware-Versionen. Das Build-Skript bindet nur den öffentlichen Schlüssel ins Image ein. Der gesamte Ordner `keys/` bleibt lokal.
 
 ## 2. Version 1 per USB installieren
 
-Sobald das öffentliche Repository existiert, öffne `idf.py menuconfig` und setze unter **OTA demo → GitHub Release firmware URL** die spätere Download-Adresse. Die Einstellung liegt lokal in `sdkconfig` und muss bei jedem Release-Build dieselbe sein.
+Trage in `platformio.ini` bei `custom_ota_url` die Adresse des späteren Assets in deinem öffentlichen GitHub-Repository ein:
 
 ```text
 https://github.com/DEIN-KONTO/DEIN-REPO/releases/latest/download/firmware.bin
 ```
 
-Mit dem voreingestellten Platzhalter kannst du die serielle Ausgabe bereits ausprobieren. Wenn du die echte URL später einstellst, flashe Version 1 erneut per USB, damit der ESP32 die Adresse kennt.
+Mit der Platzhalter-URL kannst du die serielle Ausgabe bereits testen. Sobald du die echte Adresse einträgst, flashe Version 1 mit der neuen Einstellung erneut per USB. Ersetze in den Befehlen `COM5` durch den Port deines Boards.
 
 ```powershell
-idf.py build
-idf.py -p COM5 flash
+pio run
+pio run -t upload --upload-port COM5
 ```
 
-Beim Wiederholen auf einem Board, auf dem diese Demo bereits per OTA aktualisiert wurde, kann der Bootloader weiterhin den zuletzt gewählten OTA-Slot starten. Für einen kompletten Neustart der Übung kannst du vor dem Flashen `idf.py -p COM5 erase-flash` ausführen. Das löscht den gesamten Flash inklusive der WLAN-Daten, die du dann erneut einrichtest.
+Für den Wechsel von der bisherigen ESP-IDF-Demo ist ein USB-Upload erforderlich. Der Upload installiert den Arduino-Bootloader, die Partitionstabelle und das erste App-Image. Bei Bedarf setzt `pio run -t erase --upload-port COM5` den gesamten Flash vor dem Upload zurück. Dabei werden auch die WLAN-Daten gelöscht.
 
 ## 3. WLAN einmalig per USB einrichten
 
-Lege im Projektordner eine lokale Datei `wifi-nvs.csv` in UTF-8 ohne BOM mit diesem Inhalt an. Ersetze die Beispielwerte. Enthält ein Wert ein Komma, setze ihn in doppelte Anführungszeichen. Verdopple doppelte Anführungszeichen innerhalb eines so eingeschlossenen Werts. Für ein offenes WLAN bleibt das vierte Feld in der Passwortzeile leer.
+Lege lokal im Projektordner `wifi-nvs.csv` als UTF-8 ohne BOM an und ersetze die Beispielwerte. Ein Wert mit Komma gehört in doppelte Anführungszeichen. Verdopple doppelte Anführungszeichen innerhalb eines so eingeschlossenen Werts. Für ein offenes WLAN bleibt das Passwortfeld leer.
 
 ```csv
 key,type,encoding,value
@@ -47,37 +42,35 @@ ssid,data,string,MEIN-WLAN
 password,data,string,MEIN-PASSWORT
 ```
 
+Installiere den eigenständigen NVS-Generator einmalig. Die folgenden Befehle verwenden unter Windows das Python aus der üblichen PlatformIO-Installation:
+
 ```powershell
-python "$env:IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py" generate wifi-nvs.csv wifi-nvs.bin 0x4000
-python -m esptool --chip esp32 --port COM5 write_flash 0x3d0000 wifi-nvs.bin
-idf.py -p COM5 monitor
+$pioPython = Join-Path $env:USERPROFILE '.platformio\penv\Scripts\python.exe'
+$pioEsptool = Join-Path $env:USERPROFILE '.platformio\packages\tool-esptool\esptool.exe'
+& $pioPython -m pip install esp-idf-nvs-partition-gen
+& $pioPython -m esp_idf_nvs_partition_gen generate wifi-nvs.csv wifi-nvs.bin 0x4000
+& $pioEsptool --chip esp32 --port COM5 write-flash 0x3d0000 wifi-nvs.bin
+pio device monitor --port COM5 --baud 115200
 ```
 
-Die Adresse `0x3d0000` ist der Anfang der Partition `credentials` in `partitions.csv`. OTA-Updates schreiben ausschließlich in eine App-Partition. Die WLAN-Daten bleiben auf dem Gerät und in den lokalen, ignorierten WLAN-Dateien. Im Monitor solltest du jede Sekunde `hello world 1` sehen. Mit **Strg+]** beendest du den Monitor. [Espressif zum NVS-Generator](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32/api-reference/storage/nvs_partition_gen.html)
+`0x3d0000` ist der Anfang der separaten Partition `credentials`. Die Zugangsdaten bleiben bei OTA-Updates erhalten. Beide WLAN-Dateien werden von Git ignoriert. Im Monitor sollte jede Sekunde `hello world 1` erscheinen. [Espressifs eigenständiger NVS-Generator](https://github.com/espressif/esp-idf-nvs-partition-gen)
 
 ## 4. Version 2 bauen und signieren
 
-1. Ändere den Inhalt von `version.txt` von `1` auf `2`. Verwende für jedes weitere Release eine größere ganze Zahl ohne führende Nullen.
-2. Starte den Build im gleichen Projektordner mit unveränderter Release-URL und demselben Schlüssel.
+1. Ändere den Inhalt von `version.txt` von `1` auf `2`. Verwende bei jedem weiteren Update eine höhere ganze Zahl ohne führende Nullen.
+2. Baue und signiere mit demselben Schlüssel und derselben Release-URL:
 
    ```powershell
-   idf.py build
+   pio run -t ota-release
    ```
 
-3. Kopiere das signierte App-Image unter dem festen Namen des Release-Assets.
-
-   ```powershell
-   Copy-Item build/test_01_otademo.bin build/firmware.bin
-   python -m espsecure verify_signature --version 1 --keyfile keys/ota-signing-key.pem build/firmware.bin
-   ```
-
-   Führe Kopie und Prüfung erst nach erfolgreichem Build aus. Veröffentliche die Datei nach erfolgreicher Signaturprüfung. Der ESP32 liest seine Versionsnummer aus der App-Datei. Der Git-Tag dient der Zuordnung des Releases zum Quellcode.
+3. Der Befehl prüft die Signatur mit dem öffentlichen Schlüssel. Verwende nach erfolgreichem Lauf die Datei **`.pio/build/esp32dev/ota/firmware.bin`** als Release-Asset. PlatformIO verwendet für USB-Uploads die Datei **`.pio/build/esp32dev/firmware.bin`**. Das Release-Asset enthält zusätzlich den Versionsheader und die Signatur.
 
 ## 5. Auf GitHub veröffentlichen und OTA prüfen
 
-1. Committe und pushe den passenden Quellstand ins öffentliche GitHub-Repository.
-2. Öffne dort **Releases → Draft a new release**, lege den Tag `v2` für diesen Commit an und lade `build/firmware.bin` als Release-Asset hoch.
-3. Veröffentliche das Release als reguläres Release und markiere es als **Latest**. Die in der Firmware konfigurierte URL muss jetzt das Asset `firmware.bin` liefern. GitHub leitet die Anfrage für diese feste URL zum Asset des aktuellen Releases um. [GitHub zu permanenten Release-Asset-Links](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases)
-4. Lasse den ESP32 mit Version 1 laufen und beobachte den Monitor. Beim nächsten Prüflauf nach WLAN-Verbindung und Uhrzeitsynchronisation startet der Download. Nach erfolgreicher Installation startet der ESP32 neu und gibt `hello world 2` aus. Nach einem weiteren Prüflauf sollte die Ausgabe bei Version 2 bleiben.
+1. Committe und pushe den zu Version 2 gehörenden Quellstand.
+2. Öffne im öffentlichen Repository **Releases → Draft a new release**. Lege den Tag `v2` für diesen Commit an und lade **`.pio/build/esp32dev/ota/firmware.bin`** als Asset hoch.
+3. Veröffentliche das Release als **Latest**. Die feste Adresse aus `platformio.ini` führt jetzt zu diesem Asset. [GitHub zu Release-Asset-Links](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases)
+4. Lass Version 1 auf dem Board laufen. Nach WLAN-Verbindung und Uhrzeitsynchronisation sollte das Board beim nächsten erfolgreichen Check das Update installieren, neu starten und `hello world 2` ausgeben.
 
-Wenn Version 1 weiterläuft, prüfe Download-Adresse, WLAN und den Zugang zu `pool.ntp.org` über UDP-Port 123. Für Diagnoseausgaben kannst du unter **Component config → Log → Default log verbosity** vorübergehend **Info** einstellen und mit dieser Einstellung per USB flashen. Ohne diese Diagnoseeinstellung besteht die Anwendungsausgabe aus den `hello world`-Zeilen. Beim Reset können Meldungen von ROM und Bootloader davor erscheinen.
+Wenn Version 1 weiterläuft, öffne die Release-URL ohne GitHub-Anmeldung und prüfe, ob `firmware.bin` heruntergeladen wird. Prüfe außerdem das WLAN, den Zugang zu `pool.ntp.org` über UDP-Port 123 und ob beide Builds denselben Prüfschlüssel verwenden. Beim Reset können ROM und Bootloader eigene Meldungen ausgeben.

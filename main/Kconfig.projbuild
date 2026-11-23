@@ -1,7 +1,0 @@
-menu "OTA demo"
-
-    config OTA_DEMO_URL
-        string "GitHub Release firmware URL"
-        default "https://github.com/DEIN-KONTO/DEIN-REPO/releases/latest/download/firmware.bin"
-
-endmenu
