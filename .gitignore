@@ -1,0 +1,15 @@
+# Alles ignorieren. Freigaben fuer neue Dateien einzeln eintragen.
+*
+!/.gitignore
+!/CMakeLists.txt
+!/partitions.csv
+!/sdkconfig.defaults
+!/version.txt
+
+# Die Ordner selbst freigeben, damit Git die einzelnen Dateien sehen kann.
+!/docs/
+!/docs/OTA-Anleitung.md
+!/main/
+!/main/CMakeLists.txt
+!/main/Kconfig.projbuild
+!/main/main.c
