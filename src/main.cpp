@@ -157,6 +157,8 @@ void otaTask(void *) {
             config.url = otaUrl;
             config.crt_bundle_attach = esp_crt_bundle_attach;
             config.timeout_ms = 10000;
+            // GitHub's asset redirect adds a signed query to the GET request line.
+            config.buffer_size_tx = 4096;
             config.disable_auto_redirect = true;
             auto http = esp_http_client_init(&config);
             if (http) {
