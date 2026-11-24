@@ -342,7 +342,7 @@ bool checkAndInstall(const char *url, uint32_t firmwareVersion, const uint8_t (&
     }
     const bool installed = installUpdate(http, trace, available, firmwareVersion, publicKey);
     esp_http_client_cleanup(http);
-    if (available) {
+    if (available > firmwareVersion) {
         showReleaseInfo(releaseInfo, trace.releaseAssetUrl, available);
     }
     return installed;

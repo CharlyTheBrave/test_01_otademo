@@ -8,6 +8,7 @@
 #include "ota_update.h"
 #include "wifi_connection.h"
 
+// Give synchronous OTA downloads and signature verification extra stack space in loop().
 SET_LOOP_TASK_STACK_SIZE(10240);
 
 namespace {
@@ -18,6 +19,8 @@ uint32_t nextHello;
 uint32_t lastOtaCheck;
 bool otaEnabled = false;
 
+// Check for and install an OTA update once Wi-Fi and the system clock are ready.
+// Restart the ESP32 after a successful installation.
 void checkForUpdate() {
     if (!WifiConnection::connected()) {
         Serial.println("OTA: check skipped, WiFi disconnected");
@@ -34,6 +37,8 @@ void checkForUpdate() {
 }
 } // namespace
 
+// Initialize serial output, start Wi-Fi and time synchronization, and enable OTA
+// when the release URL and public key are configured.
 void setup() {
     Serial.begin(115200);
     nextHello = millis();
@@ -49,6 +54,8 @@ void setup() {
     lastOtaCheck = millis();
 }
 
+// Run OTA checks every 30 seconds, report Wi-Fi status changes, and print
+// a timestamped hello message once per second while the loop is running.
 void loop() {
     if (otaEnabled && millis() - lastOtaCheck >= otaInterval) {
         lastOtaCheck = millis();
@@ -69,4 +76,7 @@ void loop() {
         nextHello = now + helloInterval;
     }
     delay(1);
+
+    // and here also comes what your loop *really* needs to do besides checking for OTA updates ;-)
+
 }
