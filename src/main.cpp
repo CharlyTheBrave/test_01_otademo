@@ -18,23 +18,6 @@ constexpr uint32_t otaInterval = 30000;
 uint32_t nextHello;
 uint32_t lastOtaCheck;
 bool otaEnabled = false;
-
-// Check for and install an OTA update once Wi-Fi and the system clock are ready.
-// Restart the ESP32 after a successful installation.
-void checkForUpdate() {
-    if (!WifiConnection::connected()) {
-        Serial.println("OTA: check skipped, WiFi disconnected");
-    } else if (time(nullptr) < earliestValidTime) {
-        Serial.println("OTA: check skipped, waiting for clock sync");
-    } else {
-        Serial.printf("OTA: checking for updates (current version %lu)\n",
-                      static_cast<unsigned long>(firmwareVersion));
-        if (OtaUpdate::checkAndInstall(otaUrl, firmwareVersion, otaPublicKey)) {
-            Serial.println("OTA: restarting");
-            ESP.restart();
-        }
-    }
-}
 } // namespace
 
 // Initialize serial output, start Wi-Fi and time synchronization, and enable OTA
@@ -50,6 +33,7 @@ void setup() {
     }
     configTime(0, 0, "pool.ntp.org");
     otaEnabled = hasOtaKey && strstr(otaUrl, "DEIN-KONTO/DEIN-REPO") == nullptr &&
+                 strstr(otaLatestVersionUrl, "DEIN-KONTO/DEIN-REPO") == nullptr &&
                  OtaUpdate::begin();
     lastOtaCheck = millis();
 }
@@ -57,10 +41,51 @@ void setup() {
 // Run OTA checks every 30 seconds, report Wi-Fi status changes, and print
 // a timestamped hello message once per second while the loop is running.
 void loop() {
+
+    // the loop of the application needs to call the OTA-check in the interval it likes to do so
+    // The activity is intentionally split into 3 steps as in a real-world application a user-interaction may be put inbetween them:
+    // 1) Frequently check if we have a new version -> let user know
+    // 2) show the new version details -> user accepts or dismisses the update
+    // 3) install the update
+    // in a fully automated update no interaction may happen, 2 is skipped and 1 & 3 run in a suitable service-hour
+
     if (otaEnabled && millis() - lastOtaCheck >= otaInterval) {
         lastOtaCheck = millis();
-        checkForUpdate();
+        if (!WifiConnection::connected()) {
+            Serial.println("OTA: check skipped, WiFi disconnected");
+        } else if (time(nullptr) < earliestValidTime) {
+            Serial.println("OTA: check skipped, waiting for clock sync");
+        } else {
+            // 1. Check the published version without opening the firmware asset.
+            Serial.printf("OTA: checking for updates (current version %lu)\n",
+                          static_cast<unsigned long>(firmwareVersion));
+            const uint32_t publishedVersion = OtaUpdate::quickCheck(otaLatestVersionUrl, firmwareVersion);
+            if (publishedVersion) {
+                // 2. Verify the asset's version and show the release details.
+                Serial.printf("OTA: published version %lu, checking release asset\n",
+                              static_cast<unsigned long>(publishedVersion));
+                OtaUpdate::ReleaseDetails details;
+                if (OtaUpdate::getReleaseDetails(otaUrl, firmwareVersion, publishedVersion, details)) {
+                    Serial.printf("OTA: release %lu | Git tag: %s | title: %s | built at: %s\n",
+                                  static_cast<unsigned long>(details.version),
+                                  details.tag.isEmpty() ? "unavailable" : details.tag.c_str(),
+                                  details.title.isEmpty() ? "unavailable" : details.title.c_str(),
+                                  details.builtAt.isEmpty() ? "unavailable" : details.builtAt.c_str());
+                    if (!details.notes.isEmpty()) {
+                        Serial.printf("OTA: release notes (up to 255 characters)\n%s\n", details.notes.c_str());
+                    }
+
+                    // 3. Install automatically in this demo, then restart on success.
+                    if (OtaUpdate::installUpdate(details, firmwareVersion, otaPublicKey)) {
+                        Serial.println("OTA: restarting");
+                        ESP.restart();
+                    }
+                }
+            }
+        }
     }
+
+    // This will just print a timestamp with the current version for the demo
     const uint32_t now = millis();
     WifiConnection::reportStatus();
     if (static_cast<int32_t>(now - nextHello) >= 0) {

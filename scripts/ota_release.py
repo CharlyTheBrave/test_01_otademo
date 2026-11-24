@@ -18,8 +18,11 @@ if not re.fullmatch(r"[1-9][0-9]{0,9}", version_text) or int(version_text) > 0xF
     raise ValueError("version.txt must contain an integer from 1 to 4294967295")
 version = int(version_text)
 url = env.GetProjectOption("custom_ota_url")
+latest_version_url = env.GetProjectOption("custom_ota_latest_version_url")
 if not url.startswith("https://"):
     raise ValueError("custom_ota_url must use HTTPS")
+if not latest_version_url.startswith("https://"):
+    raise ValueError("custom_ota_latest_version_url must use HTTPS")
 
 public_bytes = public_key.read_bytes() if public_key.exists() else b""
 if public_key.exists() and len(public_bytes) != 64:
@@ -31,6 +34,7 @@ config = (
     "#pragma once\n"
     f"constexpr uint32_t firmwareVersion = {version}u;\n"
     f"constexpr char otaUrl[] = {json.dumps(url)};\n"
+    f"constexpr char otaLatestVersionUrl[] = {json.dumps(latest_version_url)};\n"
     f"constexpr bool hasOtaKey = {'true' if public_bytes else 'false'};\n"
     f"constexpr uint8_t otaPublicKey[65] = {{0x04{', ' + key_bytes if key_bytes else ''}}};\n"
 )

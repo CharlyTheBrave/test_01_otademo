@@ -3,6 +3,8 @@
 
 Der ESP32 gibt bei 115200 Baud einmal pro Sekunde `hello world 1` aus. Mit WLAN, gültiger Uhrzeit und eingerichtetem Prüfschlüssel fragt `loop()` alle 30 Sekunden das aktuelle GitHub Release ab. Während der synchronen Prüfung und eines Downloads pausiert die reguläre Ausgabe. Der HTTP-Download beginnt mit einem kurzen Versionsheader. Für eine höhere Version lädt der ESP32 das App-Image in den freien OTA-Slot und prüft die ECDSA-P-256-Signatur über Versionsheader und Image. Erst nach erfolgreicher Prüfung wählt er den neuen Slot und startet neu. Bei einem abgebrochenen Download oder einer ungültigen Signatur läuft die bisherige Firmware weiter.
 
+Der ESP32 liest zuerst nur `version-latest.txt`. Ist die Nummer gleich, kleiner, ungültig oder nicht abrufbar, wird `firmware.bin` nicht angefragt. Bei einer höheren Nummer muss der Header des Release-Assets dieselbe neuere Version enthalten. So bleibt ein bereits hochgeladenes Release bis zur Freigabe in `version-latest.txt` von der Installation ausgeschlossen.
+
 ## 1. PlatformIO und Schlüssel einrichten
 
 Öffne den Projektordner in VS Code mit der **PlatformIO IDE**-Erweiterung. Verwende ein ESP32-Classic-Board mit mindestens 4 MiB Flash, ein USB-Datenkabel und ein 2,4-GHz-WLAN. Das Projekt verwendet das PlatformIO-Board `esp32dev` und `framework = arduino`. Die Build- und Flash-Werkzeuge verwaltet PlatformIO. [PlatformIO für Espressif 32](https://docs.platformio.org/en/latest/platforms/espressif32.html)
@@ -22,6 +24,14 @@ Trage in `platformio.ini` bei `custom_ota_url` die Adresse des späteren Assets 
 ```text
 https://github.com/DEIN-KONTO/DEIN-REPO/releases/latest/download/firmware.bin
 ```
+
+Setze `custom_ota_latest_version_url` auf die direkte Raw-URL von `version-latest.txt` im Stamm des öffentlichen Branches, zum Beispiel:
+
+```text
+https://raw.githubusercontent.com/DEIN-KONTO/DEIN-REPO/main/version-latest.txt
+```
+
+Die Datei enthält eine einzelne dezimale Versionsnummer. Der Startwert `0` bedeutet, dass noch kein OTA-Release freigegeben ist. `version.txt` steuert weiterhin nur den Build und kann unabhängig geändert werden.
 
 Mit der Platzhalter-URL kannst du die serielle Ausgabe bereits testen. Sobald du die echte Adresse einträgst, flashe Version 1 mit der neuen Einstellung erneut per USB. Ersetze in den Befehlen `COM5` durch den Port deines Boards.
 
@@ -72,10 +82,11 @@ pio device monitor --port COM5 --baud 115200
 
 ## 5. Auf GitHub veröffentlichen und OTA prüfen
 
-1. Committe und pushe den zu Version 2 gehörenden Quellstand.
+1. Optional: Committe und pushe den zu Version 2 gehörenden source code. Alternativ: committe ein readme-file mit beliebigem Inhalt
 2. Öffne im öffentlichen Repository **Releases → Draft a new release**. Lege den Tag `v2` für diesen Commit an, gib einen Release-Titel ein und lade **`firmware.bin`** und **`build-info.json`** aus **`.pio/build/esp32dev/ota/`** als Assets hoch.
 3. Veröffentliche das Release als **Latest**. Die feste Adresse aus `platformio.ini` führt jetzt zu diesem Asset. [GitHub zu Release-Asset-Links](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases)
-4. Lass Version 1 auf dem Board laufen. Nach WLAN-Verbindung und Uhrzeitsynchronisation sollte das Board beim nächsten erfolgreichen Check das Update installieren, neu starten und `hello world 2` ausgeben.
+4. Wenn beide Assets abrufbar sind und du Version 2 freigeben willst, setze `version-latest.txt` im öffentlichen Repository auf `2`. Committe und pushe die Datei auf den Branch der konfigurierten Raw-URL. Der Build und der GitHub-Upload aktualisieren diese Datei nicht automatisch.
+5. Lass Version 1 auf dem Board laufen. Nach der Vorprüfung installiert es das Update beim nächsten erfolgreichen Check, startet neu und gibt `hello world 2` aus.
 
 Jede `hello world`-Zeile beginnt mit der Uhrzeit in UTC, etwa `14:32:08 UTC hello world 2`. Bis zur Netzzeitsynchronisation steht dort die Laufzeit seit dem Start, etwa `uptime 5s hello world 2`.
 
@@ -90,5 +101,12 @@ Wenn Version 1 weiterläuft, öffne die Release-URL ohne GitHub-Anmeldung und pr
 ## Module in einem anderen Arduino-Projekt verwenden
 
 - `src/wifi_connection.h` und `src/wifi_connection.cpp` lesen die WLAN-Daten aus `credentials` und verbinden den ESP32. Rufe `WifiConnection::begin()` im Setup und `WifiConnection::reportStatus()` im Loop auf. Für diese WLAN-Einrichtung benötigt das Zielprojekt die NVS-Partition `credentials` und den Namensraum `wifi`.
-- `src/ota_update.h` und `src/ota_update.cpp` übernehmen HTTPS, Release-Infos, Signaturprüfung und Installation. Das Zielprojekt braucht zwei OTA-App-Slots und eine `otadata`-Partition. Rufe einmal `OtaUpdate::begin()` auf. Rufe `OtaUpdate::checkAndInstall()` synchron aus `loop()` mit Release-URL, laufender Versionsnummer und öffentlichem P-256-Schlüssel auf, sobald WLAN und Systemzeit verfügbar sind. Die Demo reserviert dafür mit `SET_LOOP_TASK_STACK_SIZE(10240)` einen größeren Stack für die Arduino-Schleife. Bei `true` kann die Anwendung neu starten.
+- `src/ota_update.h` und `src/ota_update.cpp` stellen die drei synchronen OTA-Aufrufe unten bereit. Das Zielprojekt braucht zwei OTA-App-Slots und eine `otadata`-Partition. Rufe vor der Nutzung einmal `OtaUpdate::begin()` auf und warte auf WLAN und gültige Systemzeit. Die Demo reserviert mit `SET_LOOP_TASK_STACK_SIZE(10240)` einen größeren Stack für die Arduino-Schleife.
 - `main.cpp` zeigt die Anbindung mit Arduino-Setup, 30-Sekunden-Prüfung, Uhrzeitsynchronisation und serieller Ausgabe. Für denselben Release-Build übernimm auch `scripts/ota_release.py`, `version.txt` und die zugehörigen Einstellungen aus `platformio.ini`.
+
+Für die Verwendung in einer real-life-Applikation:
+1. Rufe regelmäßig `OtaUpdate::quickCheck(latestVersionUrl, installedVersion)` auf. Die Funktion liefert die neuere veröffentlichte Nummer oder `0`, falls kein Update gefunden wurde oder die Abfrage fehlgeschlagen ist.
+2. Rufe `OtaUpdate::getReleaseDetails(firmwareUrl, installedVersion, publishedVersion, details)` auf. Die Funktion prüft den Asset-Header und füllt ein `OtaUpdate::ReleaseDetails`-Objekt. Bei passendem Header liefert sie `true`. Fehlende Metadaten bleiben leer. Dieser Schritt schreibt nichts in den Flash. Die Demo gibt die zurückgegebenen Details seriell aus.
+3. Rufe zur Installation `OtaUpdate::installUpdate(details, installedVersion, publicKey)` auf. Die Funktion öffnet das ausgewählte Asset erneut, prüft die Version und lädt und verifiziert das Update. Sie liefert die zum Booten ausgewählte Version oder `0` bei einem Fehler. Die Anwendung entscheidet über den Neustart. Wenn du die Installation aufschiebst und eine geänderte Freigabe berücksichtigen willst, wiederhole vorher die Schnellprüfung und die Abfrage der Release-Details.
+
+Die Demo führt alle drei Schritte automatisch aus. Eine andere Anwendung kann nach Schritt 1 den Benutzer informieren und nach Schritt 2 auf dessen Bestätigung warten.

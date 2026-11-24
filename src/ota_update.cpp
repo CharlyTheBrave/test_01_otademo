@@ -93,6 +93,9 @@ int64_t openRelease(esp_http_client_handle_t http, HttpTrace &trace, const char 
 }
 
 esp_http_client_handle_t createHttpClient(const char *url, HttpTrace &trace) {
+    if (!url || strncmp(url, "https://", 8) != 0) {
+        return nullptr;
+    }
     trace.requestLineLength = getRequestLineLength(url);
     esp_http_client_config_t config{};
     config.url = url;
@@ -104,6 +107,47 @@ esp_http_client_handle_t createHttpClient(const char *url, HttpTrace &trace) {
     config.event_handler = recordRedirect;
     config.user_data = &trace;
     return esp_http_client_init(&config);
+}
+
+bool readPublishedVersion(const char *url, uint32_t &version) {
+    HttpTrace trace;
+    auto http = createHttpClient(url, trace);
+    if (!http) {
+        return false;
+    }
+
+    char body[16]; // Up to ten digits and optional whitespace.
+    const int64_t size = openRelease(http, trace, "OTA published version");
+    const int count = size >= 0 && size < sizeof(body)
+                          ? esp_http_client_read_response(http, body, size > 0 ? size : sizeof(body))
+                          : -1;
+    const bool complete = count > 0 && count < sizeof(body) &&
+                          (size == 0 || count == size) &&
+                          esp_http_client_is_complete_data_received(http);
+    esp_http_client_cleanup(http);
+    if (!complete || memchr(body, '\0', count)) {
+        return false;
+    }
+
+    body[count] = '\0';
+    constexpr char whitespace[] = " \t\r\n";
+    const char *digit = body + strspn(body, whitespace);
+    if (*digit < '0' || *digit > '9') {
+        return false;
+    }
+    uint32_t value = 0;
+    do {
+        const uint32_t next = *digit++ - '0';
+        if (value > (UINT32_MAX - next) / 10) {
+            return false;
+        }
+        value = value * 10 + next;
+    } while (*digit >= '0' && *digit <= '9');
+    if (digit[strspn(digit, whitespace)] != '\0') {
+        return false;
+    }
+    version = value;
+    return true;
 }
 
 cJSON *fetchJson(const char *url, size_t limit) {
@@ -128,16 +172,6 @@ cJSON *fetchJson(const char *url, size_t limit) {
     return cJSON_ParseWithLengthOpts(body.get(), count + 1, nullptr, true);
 }
 
-struct ReleaseInfo {
-    String assetUrl;
-    String tag;
-    String title;
-    String builtAt;
-    String notes;
-    uint32_t version = 0;
-    uint32_t checkedAt = 0;
-};
-
 void copyReleaseNotes(String &preview, const char *notes) {
     if (!notes) {
         return;
@@ -154,21 +188,26 @@ void copyReleaseNotes(String &preview, const char *notes) {
     preview.concat(notes, end - notes);
 }
 
-void showReleaseInfo(ReleaseInfo &info, const String &assetUrl, uint32_t version) {
+void loadReleaseMetadata(OtaUpdate::ReleaseDetails &details) {
+    const String &assetUrl = details.assetUrl;
+    const uint32_t version = details.version;
+    static OtaUpdate::ReleaseDetails info;
+    static uint32_t checkedAt = 0;
+
     constexpr char github[] = "https://github.com/";
     constexpr char download[] = "/releases/download/";
     constexpr char firmwareAsset[] = "/firmware.bin";
     const int repoEnd = assetUrl.indexOf(download, sizeof(github) - 1);
-    if (repoEnd < 0 || !assetUrl.endsWith(firmwareAsset)) {
+    if (!assetUrl.startsWith(github) || repoEnd < 0 || !assetUrl.endsWith(firmwareAsset)) {
         Serial.println("OTA: GitHub release metadata unavailable for this asset URL");
         return;
     }
     if (info.assetUrl != assetUrl || info.version != version ||
-        millis() - info.checkedAt >= releaseInfoInterval) {
+        millis() - checkedAt >= releaseInfoInterval) {
         info = {};
         info.assetUrl = assetUrl;
         info.version = version;
-        info.checkedAt = millis();
+        checkedAt = millis();
         const auto tagStart = repoEnd + sizeof(download) - 1;
         const auto tagEnd = assetUrl.length() - (sizeof(firmwareAsset) - 1);
         const String apiUrl = String("https://api.github.com/repos/") +
@@ -202,13 +241,7 @@ void showReleaseInfo(ReleaseInfo &info, const String &assetUrl, uint32_t version
         }
         cJSON_Delete(release);
     }
-    Serial.printf("OTA: release %lu | Git tag: %s | title: %s | built at: %s\n",
-                  static_cast<unsigned long>(version), info.tag.isEmpty() ? "unavailable" : info.tag.c_str(),
-                  info.title.isEmpty() ? "unavailable" : info.title.c_str(),
-                  info.builtAt.isEmpty() ? "unavailable" : info.builtAt.c_str());
-    if (!info.notes.isEmpty()) {
-        Serial.printf("OTA: release notes (up to 255 characters)\n%s\n", info.notes.c_str());
-    }
+    details = info;
 }
 
 bool readExact(esp_http_client_handle_t http, uint8_t *bytes, size_t size) {
@@ -271,32 +304,44 @@ bool writeVerifiedImage(esp_http_client_handle_t http, esp_ota_handle_t update,
     return valid;
 }
 
-bool installUpdate(esp_http_client_handle_t http, HttpTrace &trace, uint32_t &available,
-                   uint32_t firmwareVersion, const uint8_t (&publicKey)[65]) {
+size_t readReleaseHeader(esp_http_client_handle_t http, HttpTrace &trace,
+                         uint32_t installedVersion, uint32_t expectedVersion,
+                         uint8_t (&header)[headerSize]) {
     const int64_t size = openRelease(http, trace);
-    if (size < 0) {
-        return false;
-    }
-    const auto *partition = esp_ota_get_next_update_partition(nullptr);
     constexpr int64_t overhead = headerSize + signatureSize;
-    if (!partition || size <= overhead || size - overhead > partition->size) {
-        Serial.printf("OTA: invalid asset length or unavailable OTA slot (%lld bytes)\n",
-                      static_cast<long long>(size));
-        return false;
+    if (size < 0) {
+        return 0;
     }
-    uint8_t header[headerSize];
+    if (size <= overhead || size - overhead > UINT32_MAX) {
+        Serial.printf("OTA: invalid asset length (%lld bytes)\n", static_cast<long long>(size));
+        return 0;
+    }
     if (!readExact(http, header, sizeof(header)) || memcmp(header, "OTA1", 4) != 0) {
         Serial.println("OTA: invalid or incomplete release header");
-        return false;
+        return 0;
     }
-    available = uint32_t(header[4]) | (uint32_t(header[5]) << 8) |
+    const uint32_t available = uint32_t(header[4]) | (uint32_t(header[5]) << 8) |
                 (uint32_t(header[6]) << 16) | (uint32_t(header[7]) << 24);
-    if (available <= firmwareVersion) {
+    if (available <= installedVersion) {
         Serial.printf("OTA: no newer version (release %lu)\n", static_cast<unsigned long>(available));
-        return false;
+        return 0;
+    }
+    if (available != expectedVersion) {
+        Serial.printf("OTA: release version %lu does not match published version %lu\n",
+                      static_cast<unsigned long>(available), static_cast<unsigned long>(expectedVersion));
+        return 0;
     }
 
-    const size_t imageSize = size - overhead;
+    return static_cast<size_t>(size - overhead);
+}
+
+bool flashImage(esp_http_client_handle_t http, const uint8_t (&header)[headerSize],
+                size_t imageSize, uint32_t available, const uint8_t (&publicKey)[65]) {
+    const auto *partition = esp_ota_get_next_update_partition(nullptr);
+    if (!partition || imageSize > partition->size) {
+        Serial.println("OTA: image does not fit or OTA slot unavailable");
+        return false;
+    }
     Serial.printf("OTA: downloading version %lu (%u bytes) to %s\n",
                   static_cast<unsigned long>(available), static_cast<unsigned>(imageSize), partition->label);
     esp_ota_handle_t update;
@@ -331,21 +376,65 @@ bool begin() {
     return psa_crypto_init() == PSA_SUCCESS;
 }
 
-bool checkAndInstall(const char *url, uint32_t firmwareVersion, const uint8_t (&publicKey)[65]) {
-    static ReleaseInfo releaseInfo;
+uint32_t quickCheck(const char *latestVersionUrl, uint32_t installedVersion) {
+    uint32_t publishedVersion;
+    if (!readPublishedVersion(latestVersionUrl, publishedVersion)) {
+        Serial.println("OTA: version-latest.txt unavailable or invalid, skipping firmware download");
+        return 0;
+    }
+    if (publishedVersion <= installedVersion) {
+        Serial.printf("OTA: no newer version (published %lu)\n", static_cast<unsigned long>(publishedVersion));
+        return 0;
+    }
+    return publishedVersion;
+}
+
+bool getReleaseDetails(const char *firmwareUrl, uint32_t installedVersion,
+                       uint32_t publishedVersion, ReleaseDetails &details) {
+    details = {};
+    if (publishedVersion <= installedVersion) {
+        return false;
+    }
+
     HttpTrace trace;
-    uint32_t available = 0;
-    auto http = createHttpClient(url, trace);
+    auto http = createHttpClient(firmwareUrl, trace);
     if (!http) {
         Serial.println("OTA: HTTP client initialization failed");
         return false;
     }
-    const bool installed = installUpdate(http, trace, available, firmwareVersion, publicKey);
+    uint8_t header[headerSize];
+    const size_t imageSize = readReleaseHeader(http, trace, installedVersion, publishedVersion, header);
     esp_http_client_cleanup(http);
-    if (available > firmwareVersion) {
-        showReleaseInfo(releaseInfo, trace.releaseAssetUrl, available);
+    if (!imageSize) {
+        return false;
     }
-    return installed;
+
+    details.version = publishedVersion;
+    details.assetUrl = trace.releaseAssetUrl.isEmpty() ? firmwareUrl : trace.releaseAssetUrl.c_str();
+    if (details.assetUrl.isEmpty()) {
+        return false;
+    }
+    loadReleaseMetadata(details);
+    return true;
+}
+
+uint32_t installUpdate(const ReleaseDetails &details, uint32_t installedVersion,
+                       const uint8_t (&publicKey)[65]) {
+    if (details.version <= installedVersion || details.assetUrl.isEmpty()) {
+        return 0;
+    }
+
+    HttpTrace trace;
+    auto http = createHttpClient(details.assetUrl.c_str(), trace);
+    if (!http) {
+        Serial.println("OTA: HTTP client initialization failed");
+        return 0;
+    }
+    uint8_t header[headerSize];
+    const size_t imageSize = readReleaseHeader(http, trace, installedVersion, details.version, header);
+    const bool installed = imageSize && flashImage(http, header, imageSize, details.version, publicKey);
+    esp_http_client_cleanup(http);
+    return installed ? details.version : 0;
 }
 
 } // namespace OtaUpdate

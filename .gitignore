@@ -4,6 +4,7 @@
 !/partitions.csv
 !/platformio.ini
 !/version.txt
+!/version-latest.txt
 !/README.md
 
 # Die Ordner selbst freigeben, damit Git die einzelnen Dateien sehen kann.
