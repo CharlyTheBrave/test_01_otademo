@@ -1,4 +1,5 @@
 # ESP32 Classic OTA-Übung mit PlatformIO und Arduino
+(grossteils mit Unterstützung durch ChatGpt erstellt - aber ab und zu durfte ich noch eine eigene Verbesserung einfügen und kommentieren ;-)
 
 Der ESP32 gibt bei 115200 Baud einmal pro Sekunde `hello world 1` aus. Mit WLAN, gültiger Uhrzeit und eingerichtetem Prüfschlüssel fragt `loop()` alle 30 Sekunden das aktuelle GitHub Release ab. Während der synchronen Prüfung und eines Downloads pausiert die reguläre Ausgabe. Der HTTP-Download beginnt mit einem kurzen Versionsheader. Für eine höhere Version lädt der ESP32 das App-Image in den freien OTA-Slot und prüft die ECDSA-P-256-Signatur über Versionsheader und Image. Erst nach erfolgreicher Prüfung wählt er den neuen Slot und startet neu. Bei einem abgebrochenen Download oder einer ungültigen Signatur läuft die bisherige Firmware weiter.
 
@@ -29,7 +30,8 @@ pio run
 pio run -t upload --upload-port COM5
 ```
 
-Für den Wechsel von der bisherigen ESP-IDF-Demo ist ein USB-Upload erforderlich. Der Upload installiert den Arduino-Bootloader, die Partitionstabelle und das erste App-Image. Bei Bedarf setzt `pio run -t erase --upload-port COM5` den gesamten Flash vor dem Upload zurück. Dabei werden auch die WLAN-Daten gelöscht.
+Der initiale upload zum ESP32 über ein USB-Kabel oder einen UART-Adapter installiert den Arduino-Bootloader, die Partitionstabelle und das erste App-Image. Bei Bedarf setzt `pio run -t erase --upload-port COM5` den gesamten Flash vor dem Upload zurück. Dabei werden auch die WLAN-Daten gelöscht.
+(Statt des Kommandos kann man in VS Code mit PlatformIO wohl auch einfach den upload-button für den initial upload verwenden ;-)
 
 ## 3. WLAN einmalig per USB einrichten
 
@@ -55,6 +57,8 @@ pio device monitor --port COM5 --baud 115200
 
 `0x3d0000` ist der Anfang der separaten Partition `credentials`. Die Zugangsdaten bleiben bei OTA-Updates erhalten. Beide WLAN-Dateien werden von Git ignoriert. Im Monitor erscheint jede Sekunde `hello world 1`. Beim Verbindungsversuch siehst du die verwendete SSID und ob ein Passwort gesetzt ist. Bei erfolgreicher Verbindung erscheint die IP-Adresse. Falls nach 15 Sekunden keine Verbindung besteht oder eine bestehende Verbindung abbricht, erscheint `WiFi not connected`. Der WLAN-Test funktioniert auch mit der Platzhalter-URL. [Espressifs eigenständiger NVS-Generator](https://github.com/espressif/esp-idf-nvs-partition-gen)
 
+(ok, das scheint mir jetzt ein etwas sehr umständlicher Weg zu sein, um die WLAN-Credentials auf den ESP zu bringen und gleichzeitig zu vermeiden, diese in Github veröffentlichen zu müssen. Ein öffentliches "WLAN-credentials sample-file" mit den zwei Werten SSID und Passwort hätte es ja wohl auch getan. Aber eine gute Gelegeneheit zu lernen, wie man NVRAM-Settings separat und individuell in einen ESP32 flashen kann, für die Wifi-Credentials in "echten" Applikationen bevorzuge ich einen anderen Weg, aber dieser Weg hier, diese Daten separat in das NVS des ESP32 zu flashen wäre ganz praktisch wenn man z.B. während der erstmaligen Inbetriebnahme jedem ESP32 im Haus oder Wohnmobil eindeutige Nummern oder Namen vergeben und diesen im NVS des ESP32 speichern will ;-)
+
 ## 4. Version 2 bauen und signieren
 
 1. Ändere den Inhalt von `version.txt` von `1` auf `2`. Verwende bei jedem weiteren Update eine höhere ganze Zahl ohne führende Nullen.
@@ -75,7 +79,7 @@ pio device monitor --port COM5 --baud 115200
 
 Jede `hello world`-Zeile beginnt mit der Uhrzeit in UTC, etwa `14:32:08 UTC hello world 2`. Bis zur Netzzeitsynchronisation steht dort die Laufzeit seit dem Start, etwa `uptime 5s hello world 2`.
 
-Bei jeder erfolgreichen Versionsabfrage zeigt der Monitor auch Git-Tag, Release-Titel und Build-Datum, selbst wenn die Version bereits installiert ist. Der ESP32 liest die Metadaten für den Tag, auf den GitHub den Firmware-Download umleitet, und aktualisiert den Cache nach fünf Minuten oder bei einem Versions- oder Tagwechsel. Bei älteren Releases ohne `build-info.json` erscheint für das Build-Datum `unavailable`.
+Wenn eine neuere Firmware verfügbar ist, zeigt der Monitor auch Git-Tag, Release-Titel und Build-Datum. Bei gleicher oder älterer Firmware-Version erscheint `OTA: no newer version`. Der ESP32 liest die Metadaten für den Tag, auf den GitHub den Firmware-Download umleitet, und aktualisiert den Cache nach fünf Minuten oder bei einem Versions- oder Tagwechsel. Bei älteren Releases ohne `build-info.json` erscheint für das Build-Datum `unavailable`.
 
 Wenn das Release einen Beschreibungstext enthält, zeigt der Monitor zusätzlich die ersten 255 Zeichen der Release Notes. Der Auszug verwendet das Markdown aus GitHub und erhält Zeilenumbrüche.
 

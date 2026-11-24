@@ -9,6 +9,7 @@
 # Die Ordner selbst freigeben, damit Git die einzelnen Dateien sehen kann.
 !/docs/
 !/docs/OTA-Anleitung.md
+!/docs/ota-instructions.md
 !/scripts/
 !/scripts/ota_release.py
 !/src/
