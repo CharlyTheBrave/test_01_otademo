@@ -35,7 +35,7 @@ Die Datei enthält eine einzelne dezimale Versionsnummer. Der Startwert `0` bede
 
 Mit der Platzhalter-URL kannst du die serielle Ausgabe bereits testen. Sobald du die echte Adresse einträgst, flashe Version 1 mit der neuen Einstellung erneut per USB. Ersetze in den Befehlen `COM5` durch den Port deines Boards.
 
-```powershell
+```powershell (or terminal window in VSCode)
 pio run
 pio run -t upload --upload-port COM5
 ```
@@ -56,7 +56,7 @@ password,data,string,MEIN-PASSWORT
 
 Installiere den eigenständigen NVS-Generator einmalig. Die folgenden Befehle verwenden unter Windows das Python aus der üblichen PlatformIO-Installation:
 
-```powershell
+```powershell (or terminal window in VSCode)
 $pioPython = Join-Path $env:USERPROFILE '.platformio\penv\Scripts\python.exe'
 $pioEsptool = Join-Path $env:USERPROFILE '.platformio\packages\tool-esptool\esptool.exe'
 & $pioPython -m pip install esp-idf-nvs-partition-gen
@@ -74,7 +74,7 @@ pio device monitor --port COM5 --baud 115200
 1. Ändere den Inhalt von `version.txt` von `1` auf `2`. Verwende bei jedem weiteren Update eine höhere ganze Zahl ohne führende Nullen.
 2. Baue und signiere mit demselben Schlüssel und derselben Release-URL:
 
-   ```powershell
+   ```powershell (or terminal window in VSCode)
    pio run -t ota-release
    ```
 
