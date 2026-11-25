@@ -1,16 +1,20 @@
 ## What this is about
 
-This is my “learning and development playground repository” for experimenting with over-the-air (OTA) updates. The ultimate goal is to deploy new software versions to my family of ESP32-based projects with OTA and this bare-minimum-solution helped me getting familiar with the whole procedure and is my playground to verify new OTA procedures before I apply them to my other projects. [Find my other projects on GitHub.](https://github.com/CharlyTheBrave)
+This is my “learning and development playground repository” for experimenting with over-the-air (OTA) updates. The ultimate goal is to deploy new software versions to my family of ESP32-based projects with a free-of-charge OTA using GitHub as the download server infrastructure. This bare-minimum-solution helped me getting familiar with the whole procedure and is my playground to verify new homegrown OTA procedures before I apply them to my other projects. [Find my other projects on GitHub.](https://github.com/CharlyTheBrave)
 
 It is also my first GitHub repository ever, a great learning endeavour on its own. ;-)
 
-Most of the code was written with ChatGPT/Codex. The architectural notes below explain what I changed in the initial proposal and why. They may be helpful when you design an OTA solution for your own ESP32 application.
+Most of the code was written with ChatGPT/Codex. The architectural notes below explain what I changed in the initial proposal and why. They may be helpful when you design a homegrown OTA solution for your own ESP32 application.
+
+For hobbyist-projects and a small fleet of ESP32s checking and downloading updates in a reasonable interval, the small sizes of the ESP32-firmware (usually 1-2 MB) and infrequent new releases (once a month or even less) one should never hit any of the official or inofficial traffic limits of a free account in GitHub...
+
+Alternatives: Plenty and many of them commercial - e.g. https://simpleota.com/blog/esp32-ota-services-compared/ has a decent overview at the time of writing this. You might also want to look into https://esp-github-ota.readthedocs.io/en/latest/README.html which also uses GitHub releases as download server.
 
 ## If you want to re-use the solution in this repository
 
 This OTA solution is most conveniently used with VS Code and the PlatformIO extension. You can fork this repository or download it for use on a local copy to try the whole process before applying it to a real-life ESP32 application.
 
-In any case you need to set up a **public** GitHub repository where you can create a **Release** and attach the signed `firmware.bin`. The ESP32 uses a fixed URL to find the latest release and download its firmware. You can include `build-info.json` in the same release if you want the ESP32 to display the build date next to other release details.
+In any case you need to set up a **public** GitHub repository where you can create a **Release** and attach the signed `firmware.bin`. The ESP32 uses a fixed URL to find the latest release and download its firmware from GitHub. You can include `build-info.json` in the same release if you want the ESP32 to display the build date next to other release details.
 
 The public repository needs a commit for the release tag. A short README is enough to satisfy this need. You can still keep the application source code locally or in a separate private GitHub repository if you prefer not to publish the source code itself as well in the same repository. The public GitHub repository is a simple and cheap way to have your ESP32s freely access the latest .bin file from anywhere on the world - internet access through its Wifi as a precondition.
 
